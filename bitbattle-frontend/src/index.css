@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+/* Or configure directly in CSS */
+@theme {
+    --font-family-display: "Satoshi", "sans-serif";
+    --breakpoint-3xl: 1920px;
+}
