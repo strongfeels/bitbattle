@@ -1,55 +1,59 @@
 import { useState } from 'react';
 import CollaborativeEditor from './components/CollaborativeEditor.tsx';
+import RoomLobby from './components/RoomLobby.tsx';
 
 function App() {
     const [username, setUsername] = useState<string>('');
-    const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
+    const [roomCode, setRoomCode] = useState<string>('');
+    const [isInRoom, setIsInRoom] = useState<boolean>(false);
 
-    const handleLogin = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (username.trim()) {
-            setIsLoggedIn(true);
-        }
+    const handleJoinRoom = (code: string, user: string) => {
+        setRoomCode(code);
+        setUsername(user);
+        setIsInRoom(true);
     };
 
-    if (!isLoggedIn) {
+    const handleLeaveRoom = () => {
+        setIsInRoom(false);
+        setRoomCode('');
+        // Keep username for easy re-joining
+    };
+
+    if (!isInRoom) {
         return (
-            <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-                <div className="bg-white p-8 rounded-lg shadow-lg w-96">
-                    <h1 className="text-2xl font-bold text-center mb-6">BitBattle</h1>
-                    <form onSubmit={handleLogin}>
-                        <div className="mb-4">
-                            <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-2">
-                                Enter your username
-                            </label>
-                            <input
-                                type="text"
-                                id="username"
-                                value={username}
-                                onChange={(e) => setUsername(e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                placeholder="Your username..."
-                                required
-                            />
-                        </div>
-                        <button
-                            type="submit"
-                            className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                            Join Coding Session
-                        </button>
-                    </form>
-                </div>
-            </div>
+            <RoomLobby
+                onJoinRoom={handleJoinRoom}
+                username={username}
+                setUsername={setUsername}
+            />
         );
     }
 
     return (
-        <div className="h-screen">
-            <CollaborativeEditor
-                username={username}
-                roomId="default"
-            />
+        <div className="h-screen flex flex-col">
+            {/* Room Header */}
+            <div className="bg-gray-900 text-white px-4 py-2 flex justify-between items-center">
+                <div className="flex items-center space-x-4">
+                    <h1 className="text-lg font-bold">⚔️ BitBattle</h1>
+                    <div className="bg-blue-600 px-3 py-1 rounded-full text-sm font-mono">
+                        {roomCode}
+                    </div>
+                </div>
+                <button
+                    onClick={handleLeaveRoom}
+                    className="bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm transition-colors"
+                >
+                    Leave Room
+                </button>
+            </div>
+
+            {/* Main Editor */}
+            <div className="flex-1">
+                <CollaborativeEditor
+                    username={username}
+                    roomId={roomCode}
+                />
+            </div>
         </div>
     );
 }
