@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./bitbattle-backend
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - sandbox-builder
+    environment:
+      - RUST_LOG=info
+
+  sandbox-builder:
+    build:
+      context: ./bitbattle-backend/sandbox
+      dockerfile: Dockerfile
+    image: bitbattle-sandbox:latest
+    command: ["echo", "Sandbox image built successfully"]
+
+  frontend:
+    build:
+      context: ./bitbattle-frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_URL=http://localhost:4000
