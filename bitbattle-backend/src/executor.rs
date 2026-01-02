@@ -323,6 +323,42 @@ impl CodeExecutor {
         }
     }
 
+    /// Remove Java main method from user code to avoid duplicate main methods
+    fn remove_java_main_method(code: &str) -> String {
+        // Find and remove "public static void main(String[] args) { ... }"
+        let mut result = code.to_string();
+
+        // Look for main method pattern
+        if let Some(main_start) = result.find("public static void main") {
+            // Find the opening brace of the main method
+            if let Some(brace_start) = result[main_start..].find('{') {
+                let brace_pos = main_start + brace_start;
+                let mut depth = 1;
+                let mut end_pos = brace_pos + 1;
+
+                // Find the matching closing brace
+                for (i, c) in result[brace_pos + 1..].char_indices() {
+                    match c {
+                        '{' => depth += 1,
+                        '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                end_pos = brace_pos + 1 + i + 1;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Remove the main method
+                result = format!("{}{}", &result[..main_start], &result[end_pos..]);
+            }
+        }
+
+        result.trim().to_string()
+    }
+
     fn create_tar_archive(&self, filename: &str, content: &str) -> Result<Vec<u8>, String> {
         use tar::Builder;
 
@@ -852,7 +888,9 @@ impl CodeExecutor {
             // Find the content between the first { and last }
             if let Some(start) = user_code.find('{') {
                 if let Some(end) = user_code.rfind('}') {
-                    user_code[start + 1..end].trim().to_string()
+                    let content = user_code[start + 1..end].trim().to_string();
+                    // Remove user's main method if present (we'll add our own)
+                    Self::remove_java_main_method(&content)
                 } else {
                     user_code.to_string()
                 }
@@ -860,7 +898,8 @@ impl CodeExecutor {
                 user_code.to_string()
             }
         } else {
-            user_code.to_string()
+            // If no class wrapper, just use the code but remove any main method
+            Self::remove_java_main_method(user_code)
         };
 
         let (imports, main_code) = match problem_id {

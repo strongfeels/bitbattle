@@ -9,7 +9,7 @@ export default function NavBar() {
     const isActive = (path: string) => location.pathname === path;
 
     return (
-        <nav className="bg-zinc-800 border-b border-zinc-700">
+        <nav className="bg-zinc-800 border-b border-zinc-700" aria-label="Main navigation">
             <div className="max-w-5xl mx-auto px-4">
                 <div className="flex items-center justify-between h-12">
                     {/* Logo */}
@@ -78,7 +78,7 @@ export default function NavBar() {
                                 </Link>
                                 <button
                                     onClick={logout}
-                                    className="text-zinc-500 hover:text-zinc-300 text-sm transition-colors"
+                                    className="text-zinc-500 hover:text-zinc-300 text-sm transition-colors" aria-label="Sign out of your account"
                                 >
                                     Logout
                                 </button>

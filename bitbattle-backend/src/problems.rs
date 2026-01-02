@@ -1868,3 +1868,278 @@ func main() {
         self.add_problem(median_two_arrays);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod problem_database {
+        use super::*;
+
+        #[test]
+        fn test_new_creates_database_with_problems() {
+            let db = ProblemDatabase::new();
+            assert!(db.problems.len() > 0);
+        }
+
+        #[test]
+        fn test_has_twelve_default_problems() {
+            let db = ProblemDatabase::new();
+            assert_eq!(db.problems.len(), 12);
+        }
+
+        #[test]
+        fn test_get_problem_by_id() {
+            let db = ProblemDatabase::new();
+            let problem = db.get_problem("two-sum");
+            assert!(problem.is_some());
+            assert_eq!(problem.unwrap().title, "Two Sum");
+        }
+
+        #[test]
+        fn test_get_problem_returns_none_for_invalid_id() {
+            let db = ProblemDatabase::new();
+            let problem = db.get_problem("invalid-problem-id");
+            assert!(problem.is_none());
+        }
+
+        #[test]
+        fn test_get_random_problem_returns_some() {
+            let db = ProblemDatabase::new();
+            let problem = db.get_random_problem();
+            assert!(problem.is_some());
+        }
+
+        #[test]
+        fn test_get_random_problem_empty_database_returns_none() {
+            let db = ProblemDatabase {
+                problems: HashMap::new(),
+            };
+            let problem = db.get_random_problem();
+            assert!(problem.is_none());
+        }
+
+        #[test]
+        fn test_get_problems_by_difficulty_easy() {
+            let db = ProblemDatabase::new();
+            let easy_problems = db.get_problems_by_difficulty(&Difficulty::Easy);
+            assert!(easy_problems.len() > 0);
+            for problem in easy_problems {
+                assert_eq!(problem.difficulty, Difficulty::Easy);
+            }
+        }
+
+        #[test]
+        fn test_get_problems_by_difficulty_medium() {
+            let db = ProblemDatabase::new();
+            let medium_problems = db.get_problems_by_difficulty(&Difficulty::Medium);
+            assert!(medium_problems.len() > 0);
+            for problem in medium_problems {
+                assert_eq!(problem.difficulty, Difficulty::Medium);
+            }
+        }
+
+        #[test]
+        fn test_get_problems_by_difficulty_hard() {
+            let db = ProblemDatabase::new();
+            let hard_problems = db.get_problems_by_difficulty(&Difficulty::Hard);
+            assert!(hard_problems.len() > 0);
+            for problem in hard_problems {
+                assert_eq!(problem.difficulty, Difficulty::Hard);
+            }
+        }
+
+        #[test]
+        fn test_get_random_problem_by_difficulty_easy() {
+            let db = ProblemDatabase::new();
+            let problem = db.get_random_problem_by_difficulty(Some("easy"));
+            assert!(problem.is_some());
+            assert_eq!(problem.unwrap().difficulty, Difficulty::Easy);
+        }
+
+        #[test]
+        fn test_get_random_problem_by_difficulty_medium() {
+            let db = ProblemDatabase::new();
+            let problem = db.get_random_problem_by_difficulty(Some("medium"));
+            assert!(problem.is_some());
+            assert_eq!(problem.unwrap().difficulty, Difficulty::Medium);
+        }
+
+        #[test]
+        fn test_get_random_problem_by_difficulty_hard() {
+            let db = ProblemDatabase::new();
+            let problem = db.get_random_problem_by_difficulty(Some("hard"));
+            assert!(problem.is_some());
+            assert_eq!(problem.unwrap().difficulty, Difficulty::Hard);
+        }
+
+        #[test]
+        fn test_get_random_problem_by_difficulty_random_returns_any() {
+            let db = ProblemDatabase::new();
+            let problem = db.get_random_problem_by_difficulty(Some("random"));
+            assert!(problem.is_some());
+        }
+
+        #[test]
+        fn test_get_random_problem_by_difficulty_none_returns_any() {
+            let db = ProblemDatabase::new();
+            let problem = db.get_random_problem_by_difficulty(None);
+            assert!(problem.is_some());
+        }
+
+        #[test]
+        fn test_add_problem() {
+            let mut db = ProblemDatabase {
+                problems: HashMap::new(),
+            };
+            let problem = Problem {
+                id: "test-problem".to_string(),
+                title: "Test Problem".to_string(),
+                description: "A test problem".to_string(),
+                difficulty: Difficulty::Easy,
+                examples: vec![],
+                test_cases: vec![],
+                starter_code: HashMap::new(),
+                time_limit_minutes: Some(10),
+                tags: vec![],
+            };
+            db.add_problem(problem);
+            assert_eq!(db.problems.len(), 1);
+            assert!(db.get_problem("test-problem").is_some());
+        }
+    }
+
+    mod problem_structure {
+        use super::*;
+
+        #[test]
+        fn test_two_sum_has_test_cases() {
+            let db = ProblemDatabase::new();
+            let problem = db.get_problem("two-sum").unwrap();
+            assert!(problem.test_cases.len() >= 3);
+        }
+
+        #[test]
+        fn test_two_sum_has_starter_code_for_all_languages() {
+            let db = ProblemDatabase::new();
+            let problem = db.get_problem("two-sum").unwrap();
+            let languages = ["javascript", "python", "java", "c", "cpp", "rust", "go"];
+            for lang in languages {
+                assert!(
+                    problem.starter_code.contains_key(lang),
+                    "Missing starter code for {}",
+                    lang
+                );
+            }
+        }
+
+        #[test]
+        fn test_all_problems_have_test_cases() {
+            let db = ProblemDatabase::new();
+            for (id, problem) in &db.problems {
+                assert!(
+                    !problem.test_cases.is_empty(),
+                    "Problem {} has no test cases",
+                    id
+                );
+            }
+        }
+
+        #[test]
+        fn test_all_problems_have_examples() {
+            let db = ProblemDatabase::new();
+            for (id, problem) in &db.problems {
+                assert!(
+                    !problem.examples.is_empty(),
+                    "Problem {} has no examples",
+                    id
+                );
+            }
+        }
+
+        #[test]
+        fn test_all_problems_have_time_limit() {
+            let db = ProblemDatabase::new();
+            for (id, problem) in &db.problems {
+                assert!(
+                    problem.time_limit_minutes.is_some(),
+                    "Problem {} has no time limit",
+                    id
+                );
+            }
+        }
+
+        #[test]
+        fn test_difficulty_distribution() {
+            let db = ProblemDatabase::new();
+            let easy_count = db.get_problems_by_difficulty(&Difficulty::Easy).len();
+            let medium_count = db.get_problems_by_difficulty(&Difficulty::Medium).len();
+            let hard_count = db.get_problems_by_difficulty(&Difficulty::Hard).len();
+
+            assert_eq!(easy_count, 5, "Expected 5 easy problems");
+            assert_eq!(medium_count, 4, "Expected 4 medium problems");
+            assert_eq!(hard_count, 3, "Expected 3 hard problems");
+        }
+    }
+
+    mod test_case_structure {
+        use super::*;
+
+        #[test]
+        fn test_test_case_has_input_and_output() {
+            let test_case = TestCase {
+                input: "test input".to_string(),
+                expected_output: "expected output".to_string(),
+                explanation: Some("explanation".to_string()),
+            };
+            assert_eq!(test_case.input, "test input");
+            assert_eq!(test_case.expected_output, "expected output");
+            assert_eq!(test_case.explanation, Some("explanation".to_string()));
+        }
+
+        #[test]
+        fn test_test_case_explanation_optional() {
+            let test_case = TestCase {
+                input: "test input".to_string(),
+                expected_output: "expected output".to_string(),
+                explanation: None,
+            };
+            assert!(test_case.explanation.is_none());
+        }
+    }
+
+    mod difficulty {
+        use super::*;
+
+        #[test]
+        fn test_difficulty_equality() {
+            assert_eq!(Difficulty::Easy, Difficulty::Easy);
+            assert_eq!(Difficulty::Medium, Difficulty::Medium);
+            assert_eq!(Difficulty::Hard, Difficulty::Hard);
+            assert_ne!(Difficulty::Easy, Difficulty::Medium);
+            assert_ne!(Difficulty::Medium, Difficulty::Hard);
+        }
+
+        #[test]
+        fn test_difficulty_serialization() {
+            let easy = serde_json::to_string(&Difficulty::Easy).unwrap();
+            let medium = serde_json::to_string(&Difficulty::Medium).unwrap();
+            let hard = serde_json::to_string(&Difficulty::Hard).unwrap();
+
+            assert_eq!(easy, "\"Easy\"");
+            assert_eq!(medium, "\"Medium\"");
+            assert_eq!(hard, "\"Hard\"");
+        }
+
+        #[test]
+        fn test_difficulty_deserialization() {
+            let easy: Difficulty = serde_json::from_str("\"Easy\"").unwrap();
+            let medium: Difficulty = serde_json::from_str("\"Medium\"").unwrap();
+            let hard: Difficulty = serde_json::from_str("\"Hard\"").unwrap();
+
+            assert_eq!(easy, Difficulty::Easy);
+            assert_eq!(medium, Difficulty::Medium);
+            assert_eq!(hard, Difficulty::Hard);
+        }
+    }
+}

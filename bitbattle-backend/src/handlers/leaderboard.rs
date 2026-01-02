@@ -5,6 +5,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
+use crate::error::{AppError, AppResult};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -51,10 +52,19 @@ struct LeaderboardRow {
 pub async fn get_leaderboard(
     State(state): State<AppState>,
     Query(params): Query<LeaderboardQuery>,
-) -> Json<LeaderboardResponse> {
+) -> AppResult<Json<LeaderboardResponse>> {
     let sort_by = params.sort_by.unwrap_or_else(|| "wins".to_string());
     let limit = params.limit.unwrap_or(50).min(100);
     let offset = params.offset.unwrap_or(0);
+
+    // Validate sort_by parameter
+    let valid_sort_options = ["wins", "problems_solved", "fastest", "streak"];
+    if !valid_sort_options.contains(&sort_by.as_str()) {
+        return Err(AppError::validation(
+            "sort_by",
+            format!("Invalid sort option. Valid options: {}", valid_sort_options.join(", ")),
+        ));
+    }
 
     let order_clause = match sort_by.as_str() {
         "problems_solved" => "us.problems_solved DESC",
@@ -90,15 +100,13 @@ pub async fn get_leaderboard(
         .bind(limit)
         .bind(offset)
         .fetch_all(&state.db_pool)
-        .await
-        .unwrap_or_default();
+        .await?;
 
     let total: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM user_stats WHERE games_played > 0"
     )
     .fetch_one(&state.db_pool)
-    .await
-    .unwrap_or(0);
+    .await?;
 
     let entries: Vec<LeaderboardEntry> = rows
         .into_iter()
@@ -117,5 +125,5 @@ pub async fn get_leaderboard(
         })
         .collect();
 
-    Json(LeaderboardResponse { entries, total })
+    Ok(Json(LeaderboardResponse { entries, total }))
 }

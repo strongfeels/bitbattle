@@ -1,33 +1,97 @@
 version: '3.8'
 
 services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: bitbattle-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-bitbattle}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bitbattle}
+      POSTGRES_DB: ${POSTGRES_DB:-bitbattle}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bitbattle} -d ${POSTGRES_DB:-bitbattle}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - bitbattle-network
+
+  # Backend API
   backend:
     build:
       context: ./bitbattle-backend
       dockerfile: Dockerfile
+    container_name: bitbattle-backend
+    restart: unless-stopped
     ports:
       - "4000:4000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
-      - sandbox-builder
+      postgres:
+        condition: service_healthy
+      sandbox-builder:
+        condition: service_completed_successfully
     environment:
-      - RUST_LOG=info
+      - HOST=0.0.0.0
+      - PORT=4000
+      - DATABASE_URL=postgres://${POSTGRES_USER:-bitbattle}:${POSTGRES_PASSWORD:-bitbattle}@postgres:5432/${POSTGRES_DB:-bitbattle}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost:4000/auth/callback}
+      - JWT_SECRET=${JWT_SECRET}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:3000}
+      - JSON_LOGGING=${JSON_LOGGING:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - DB_MAX_CONNECTIONS=${DB_MAX_CONNECTIONS:-10}
+      - DB_MIN_CONNECTIONS=${DB_MIN_CONNECTIONS:-2}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - bitbattle-network
 
+  # Sandbox image builder (one-time)
   sandbox-builder:
     build:
       context: ./bitbattle-backend/sandbox
       dockerfile: Dockerfile
     image: bitbattle-sandbox:latest
+    container_name: bitbattle-sandbox-builder
     command: ["echo", "Sandbox image built successfully"]
+    networks:
+      - bitbattle-network
 
+  # Frontend (development)
   frontend:
     build:
       context: ./bitbattle-frontend
       dockerfile: Dockerfile
+    container_name: bitbattle-frontend
+    restart: unless-stopped
     ports:
       - "5173:5173"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     environment:
-      - VITE_API_URL=http://localhost:4000
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:4000}
+    networks:
+      - bitbattle-network
+
+volumes:
+  postgres_data:
+
+networks:
+  bitbattle-network:
+    driver: bridge

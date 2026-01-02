@@ -1,11 +1,29 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import CodeMirrorEditor from './CodeMirrorEditor.tsx';
 import ProblemPanel from './ProblemPanel.tsx';
+import GameOverScreen from './GameOverScreen.tsx';
 import { useWebSocket } from '../hooks/useWebSocket.ts';
+import { getApiBaseUrl, getWsBaseUrl } from '../utils/api';
 
 type Difficulty = 'random' | 'easy' | 'medium' | 'hard';
-type GameState = 'waiting' | 'countdown' | 'playing' | 'room_full';
+type GameState = 'waiting' | 'countdown' | 'playing' | 'room_full' | 'game_over';
 type GameMode = 'casual' | 'ranked';
+
+interface RatingChange {
+    old_rating: number;
+    new_rating: number;
+    change: number;
+}
+
+interface GameOverData {
+    winner: string;
+    solve_time_ms: number;
+    problem_id: string;
+    difficulty: string;
+    game_mode: string;
+    rating_changes: Record<string, RatingChange>;
+    players: string[];
+}
 
 interface Props {
     roomId?: string;
@@ -68,8 +86,8 @@ interface WebSocketMessageData {
 }
 
 interface WebSocketMessage {
-    type: 'code_change' | 'cursor_position' | 'user_joined' | 'user_left' | 'problem_assigned' | 'submission_result' | 'player_count' | 'game_start' | 'room_full';
-    data: WebSocketMessageData;
+    type: 'code_change' | 'cursor_position' | 'user_joined' | 'user_left' | 'problem_assigned' | 'submission_result' | 'player_count' | 'game_start' | 'room_full' | 'game_over';
+    data: WebSocketMessageData & Partial<GameOverData>;
 }
 
 interface UserEditor {
@@ -187,6 +205,7 @@ export default function CollaborativeEditor({
     const [gameState, setGameState] = useState<GameState>('waiting');
     const [countdown, setCountdown] = useState<number>(3);
     const [connectedPlayerCount, setConnectedPlayerCount] = useState<number>(0);
+    const [gameOverData, setGameOverData] = useState<GameOverData | null>(null);
     const timerRef = useRef<NodeJS.Timeout>(undefined);
 
     // Initialize current user's editor
@@ -348,6 +367,20 @@ export default function CollaborativeEditor({
                     setGameState('room_full');
                     break;
 
+                case 'game_over':
+                    console.log('🏆 Game over:', parsed.data);
+                    setGameOverData({
+                        winner: parsed.data.winner || '',
+                        solve_time_ms: parsed.data.solve_time_ms || 0,
+                        problem_id: parsed.data.problem_id || '',
+                        difficulty: parsed.data.difficulty || '',
+                        game_mode: parsed.data.game_mode || '',
+                        rating_changes: parsed.data.rating_changes || {},
+                        players: parsed.data.players || [],
+                    });
+                    setGameState('game_over');
+                    break;
+
                 default:
                     console.log('❓ Unknown message type:', parsed.type);
                     break;
@@ -358,7 +391,7 @@ export default function CollaborativeEditor({
     }, [username, initialCode, currentProblem, selectedLanguage]);
 
     const { sendMessage } = useWebSocket({
-        url: `ws://localhost:4000/ws?room=${encodeURIComponent(roomId)}&difficulty=${encodeURIComponent(difficulty)}&players=${requiredPlayers}&mode=${encodeURIComponent(gameMode)}`,
+        url: `${getWsBaseUrl()}/ws?room=${encodeURIComponent(roomId)}&difficulty=${encodeURIComponent(difficulty)}&players=${requiredPlayers}&mode=${encodeURIComponent(gameMode)}`,
         onMessage: handleMessage,
         onOpen: () => {
             console.log('🟢 CollaborativeEditor: WebSocket connected');
@@ -388,7 +421,7 @@ export default function CollaborativeEditor({
         setIsSubmitting(true);
 
         try {
-            const response = await fetch('http://localhost:4000/submit', {
+            const response = await fetch(`${getApiBaseUrl()}/submit`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -572,6 +605,22 @@ export default function CollaborativeEditor({
                     <p className="text-xl text-green-200">Battle starts in...</p>
                 </div>
             </div>
+        );
+    }
+
+    // Show game over screen
+    if (gameState === 'game_over' && gameOverData) {
+        return (
+            <GameOverScreen
+                data={gameOverData}
+                currentUser={username}
+                onPlayAgain={() => {
+                    // Navigate back to lobby for rematch
+                    if (onLeaveRoom) {
+                        onLeaveRoom();
+                    }
+                }}
+            />
         );
     }
 

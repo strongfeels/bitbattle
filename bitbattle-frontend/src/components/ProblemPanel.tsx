@@ -54,11 +54,11 @@ export default function ProblemPanel({ problem, timeRemaining }: Props) {
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
                     <h1 className="text-lg md:text-xl font-bold text-gray-900">{problem.title}</h1>
                     <div className="flex items-center space-x-2">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getDifficultyColor()}`}>
+                        <span role="timer" aria-live="polite" aria-label="Time remaining" className={`px-2 py-1 rounded-full text-xs font-medium ${getDifficultyColor()}`}>
                             {problem.difficulty}
                         </span>
                         {timeRemaining !== undefined && (
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            <span role="timer" aria-live="polite" aria-label="Time remaining" className={`px-2 py-1 rounded-full text-xs font-medium ${
                                 timeRemaining < 300 ? 'text-red-600 bg-red-100' : 'text-blue-600 bg-blue-100'
                             }`}>
                                 {formatTimeRemaining(timeRemaining)}

@@ -5,6 +5,8 @@ import GoogleLoginButton from './GoogleLoginButton.tsx';
 import Logo from './Logo.tsx';
 import NavBar from './NavBar.tsx';
 import Footer from './Footer.tsx';
+import MatchmakingQueue from './MatchmakingQueue.tsx';
+import type { QueueDifficulty, MatchInfo } from '../utils/matchmaking.ts';
 
 type Difficulty = 'random' | 'easy' | 'medium' | 'hard';
 type GameMode = 'casual' | 'ranked';
@@ -15,29 +17,38 @@ interface Props {
     setUsername: (username: string) => void;
 }
 
-// Generate a random guest name
-function generateGuestName(): string {
+// Generate or retrieve a persistent guest name
+function getGuestName(): string {
+    const stored = localStorage.getItem('bitbattle_guest_name');
+    if (stored) {
+        return stored;
+    }
     const num = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-    return `guest_${num}`;
+    const name = `guest_${num}`;
+    localStorage.setItem('bitbattle_guest_name', name);
+    return name;
 }
 
 export default function RoomLobby({ onJoinRoom, username, setUsername }: Props) {
     const { user, isAuthenticated, isLoading } = useAuth();
-    const [mode, setMode] = useState<'home' | 'create' | 'join'>('home');
+    const [mode, setMode] = useState<'home' | 'create' | 'join' | 'quickmatch'>('home');
     const [roomCode, setRoomCode] = useState('');
     const [isCreating, setIsCreating] = useState(false);
     const [difficulty, setDifficulty] = useState<Difficulty>('random');
     const [playerCount, setPlayerCount] = useState<number>(2);
     const [gameMode, setGameMode] = useState<GameMode>('casual');
+    const [isSearching, setIsSearching] = useState(false);
+    const [quickMatchDifficulty, setQuickMatchDifficulty] = useState<QueueDifficulty>('any');
+    const [quickMatchMode, setQuickMatchMode] = useState<GameMode>('casual');
 
     // Set username based on auth status
     useEffect(() => {
         if (isAuthenticated && user) {
             setUsername(user.display_name);
         } else if (!isLoading && !isAuthenticated) {
-            // Generate guest name when not authenticated (including after logout)
+            // Get persistent guest name when not authenticated
             if (!username || !username.startsWith('guest_')) {
-                setUsername(generateGuestName());
+                setUsername(getGuestName());
             }
         }
     }, [isAuthenticated, user, isLoading, username, setUsername]);
@@ -71,7 +82,27 @@ export default function RoomLobby({ onJoinRoom, username, setUsername }: Props) 
     };
 
     const handleQuickJoin = () => {
-        onJoinRoom('QUICK-BATTLE-0001', displayName);
+        setMode('quickmatch');
+    };
+
+    const handleStartQuickMatch = () => {
+        // For ranked, require authentication
+        if (quickMatchMode === 'ranked' && !isAuthenticated) {
+            return;
+        }
+        setIsSearching(true);
+    };
+
+    const handleMatchFound = (matchInfo: MatchInfo) => {
+        setIsSearching(false);
+        // Convert difficulty string to our Difficulty type
+        const diff = matchInfo.difficulty === 'random' ? 'random' : matchInfo.difficulty as Difficulty;
+        const mode = matchInfo.game_mode as GameMode;
+        onJoinRoom(matchInfo.room_code, displayName, diff, 2, mode);
+    };
+
+    const handleCancelSearch = () => {
+        setIsSearching(false);
     };
 
     if (mode === 'home') {
@@ -113,14 +144,14 @@ export default function RoomLobby({ onJoinRoom, username, setUsername }: Props) 
                         <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-5 space-y-2">
                             <button
                                 onClick={() => setMode('create')}
-                                className="w-full py-2.5 rounded text-sm font-medium bg-green-600 hover:bg-green-500 text-white transition-colors"
+                                className="w-full py-2.5 rounded text-sm font-medium bg-green-600 hover:bg-green-500 text-white transition-colors" aria-label="Create a new game room"
                             >
                                 Create Room
                             </button>
 
                             <button
                                 onClick={() => setMode('join')}
-                                className="w-full py-2.5 rounded text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+                                className="w-full py-2.5 rounded text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors" aria-label="Join an existing game room"
                             >
                                 Join Room
                             </button>
@@ -362,6 +393,139 @@ export default function RoomLobby({ onJoinRoom, username, setUsername }: Props) 
                     </div>
                 </div>
                 <Footer />
+            </div>
+        );
+    }
+
+    if (mode === 'quickmatch') {
+        return (
+            <div className="min-h-screen bg-zinc-900 flex flex-col">
+                <NavBar />
+                <div className="flex-1 flex items-center justify-center p-4">
+                    <div className="w-full max-w-sm">
+                        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-5">
+                            <h2 className="text-lg font-semibold text-white mb-4">Quick Match</h2>
+
+                            {/* Game Mode */}
+                            <div className="mb-4">
+                                <label className="block text-xs font-medium text-zinc-400 mb-2 uppercase tracking-wide">
+                                    Mode
+                                </label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button
+                                        onClick={() => setQuickMatchMode('casual')}
+                                        className={`py-2 rounded text-sm font-medium transition-colors ${
+                                            quickMatchMode === 'casual'
+                                                ? 'bg-blue-600 text-white'
+                                                : 'bg-zinc-700 text-zinc-300 hover:bg-zinc-600'
+                                        }`}
+                                    >
+                                        Casual
+                                    </button>
+                                    <button
+                                        onClick={() => isAuthenticated && setQuickMatchMode('ranked')}
+                                        className={`py-2 rounded text-sm font-medium transition-colors ${
+                                            quickMatchMode === 'ranked'
+                                                ? 'bg-amber-600 text-white'
+                                                : 'bg-zinc-700 text-zinc-300 hover:bg-zinc-600'
+                                        } ${!isAuthenticated ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                        Ranked
+                                    </button>
+                                </div>
+                                {!isAuthenticated && (
+                                    <p className="text-zinc-500 text-xs mt-1">Sign in to play ranked</p>
+                                )}
+                            </div>
+
+                            {/* Difficulty */}
+                            <div className="mb-5">
+                                <label className="block text-xs font-medium text-zinc-400 mb-2 uppercase tracking-wide">
+                                    Difficulty
+                                </label>
+                                <div className="grid grid-cols-4 gap-1.5">
+                                    {(['any', 'easy', 'medium', 'hard'] as QueueDifficulty[]).map((d) => (
+                                        <button
+                                            key={d}
+                                            onClick={() => setQuickMatchDifficulty(d)}
+                                            className={`py-1.5 rounded text-xs font-medium transition-colors ${
+                                                quickMatchDifficulty === d
+                                                    ? d === 'easy' ? 'bg-green-600 text-white'
+                                                    : d === 'medium' ? 'bg-yellow-600 text-white'
+                                                    : d === 'hard' ? 'bg-red-600 text-white'
+                                                    : 'bg-purple-600 text-white'
+                                                    : 'bg-zinc-700 text-zinc-300 hover:bg-zinc-600'
+                                            }`}
+                                        >
+                                            {d === 'any' ? 'Any' : d.charAt(0).toUpperCase() + d.slice(1)}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Summary */}
+                            <div className="bg-zinc-900 rounded p-3 mb-4 text-sm">
+                                <div className="flex justify-between text-zinc-400 mb-1">
+                                    <span>Player</span>
+                                    <span className="text-white">{displayName}</span>
+                                </div>
+                                <div className="flex justify-between text-zinc-400 mb-1">
+                                    <span>Mode</span>
+                                    <span className={quickMatchMode === 'ranked' ? 'text-amber-400' : 'text-blue-400'}>
+                                        {quickMatchMode.charAt(0).toUpperCase() + quickMatchMode.slice(1)}
+                                    </span>
+                                </div>
+                                <div className="flex justify-between text-zinc-400">
+                                    <span>Difficulty</span>
+                                    <span className={
+                                        quickMatchDifficulty === 'easy' ? 'text-green-400' :
+                                        quickMatchDifficulty === 'medium' ? 'text-yellow-400' :
+                                        quickMatchDifficulty === 'hard' ? 'text-red-400' : 'text-purple-400'
+                                    }>
+                                        {quickMatchDifficulty === 'any' ? 'Any' : quickMatchDifficulty.charAt(0).toUpperCase() + quickMatchDifficulty.slice(1)}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <button
+                                onClick={handleStartQuickMatch}
+                                disabled={quickMatchMode === 'ranked' && !isAuthenticated}
+                                className={`w-full py-2.5 rounded text-sm font-medium transition-colors ${
+                                    quickMatchMode === 'ranked' && !isAuthenticated
+                                        ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed'
+                                        : 'bg-orange-600 hover:bg-orange-500 text-white'
+                                }`}
+                            >
+                                Find Match
+                            </button>
+
+                            <button
+                                onClick={() => setMode('home')}
+                                className="w-full py-2 mt-2 rounded text-sm text-zinc-400 hover:text-white transition-colors"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+
+                        {/* Queue info */}
+                        <div className="mt-4 text-center text-zinc-500 text-xs">
+                            <p>You'll be matched with a player of similar skill</p>
+                            <p className="mt-1">Average wait time: ~30 seconds</p>
+                        </div>
+                    </div>
+                </div>
+                <Footer />
+
+                {/* Matchmaking Queue Overlay */}
+                {isSearching && (
+                    <MatchmakingQueue
+                        username={displayName}
+                        difficulty={quickMatchDifficulty}
+                        gameMode={quickMatchMode}
+                        onMatchFound={handleMatchFound}
+                        onCancel={handleCancelSearch}
+                    />
+                )}
             </div>
         );
     }

@@ -1,13 +1,12 @@
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
-    response::IntoResponse,
     Json,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::models::{GameResult, ProblemBest, User, UserStats};
+use crate::error::{AppError, AppResult};
+use crate::models::{GameResult, User, UserStats};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -74,25 +73,17 @@ pub struct GameHistoryEntry {
 pub async fn get_user_profile(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
-) -> impl IntoResponse {
-    let uuid = match Uuid::parse_str(&user_id) {
-        Ok(u) => u,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid user ID").into_response(),
-    };
+) -> AppResult<Json<ProfileResponse>> {
+    let uuid = Uuid::parse_str(&user_id)
+        .map_err(|_| AppError::validation("user_id", "Invalid user ID format"))?;
 
-    let user = match User::find_by_id(&state.db_pool, uuid).await {
-        Ok(Some(u)) => u,
-        Ok(None) => return (StatusCode::NOT_FOUND, "User not found").into_response(),
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
-    };
+    let user = User::find_by_id(&state.db_pool, uuid)
+        .await?
+        .ok_or_else(|| AppError::not_found("User", user_id.clone()))?;
 
-    let stats = match UserStats::find_by_user_id(&state.db_pool, uuid).await {
-        Ok(Some(s)) => s,
-        Ok(None) => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Stats not found").into_response()
-        }
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
-    };
+    let stats = UserStats::find_by_user_id(&state.db_pool, uuid)
+        .await?
+        .ok_or_else(|| AppError::not_found("UserStats", user_id))?;
 
     let problem_bests = GameResult::get_user_problem_bests(&state.db_pool, uuid)
         .await
@@ -114,7 +105,7 @@ pub async fn get_user_profile(
         }
     }
 
-    Json(ProfileResponse {
+    Ok(Json(ProfileResponse {
         id: user.id.to_string(),
         email: user.email,
         display_name: user.display_name,
@@ -150,8 +141,7 @@ pub async fn get_user_profile(
             },
         },
         problem_bests,
-    })
-    .into_response()
+    }))
 }
 
 // GET /users/:id/history
@@ -159,18 +149,13 @@ pub async fn get_game_history(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
     Query(params): Query<HistoryQuery>,
-) -> impl IntoResponse {
-    let uuid = match Uuid::parse_str(&user_id) {
-        Ok(u) => u,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid user ID").into_response(),
-    };
+) -> AppResult<Json<Vec<GameHistoryEntry>>> {
+    let uuid = Uuid::parse_str(&user_id)
+        .map_err(|_| AppError::validation("user_id", "Invalid user ID format"))?;
 
     let limit = params.limit.unwrap_or(20).min(100);
 
-    let results = match GameResult::find_by_user(&state.db_pool, uuid, limit).await {
-        Ok(r) => r,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
-    };
+    let results = GameResult::find_by_user(&state.db_pool, uuid, limit).await?;
 
     let history: Vec<GameHistoryEntry> = results
         .into_iter()
@@ -188,5 +173,5 @@ pub async fn get_game_history(
         })
         .collect();
 
-    Json(history).into_response()
+    Ok(Json(history))
 }

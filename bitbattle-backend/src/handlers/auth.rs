@@ -3,14 +3,16 @@ use axum::{
     response::{IntoResponse, Redirect},
     Json,
 };
+use chrono::{Duration, Utc};
 use oauth2::{
     basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, ClientSecret,
     CsrfToken, RedirectUrl, Scope, TokenResponse, TokenUrl,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::auth::{jwt::create_token, AuthUser};
-use crate::models::User;
+use crate::auth::{jwt, AuthUser};
+use crate::error::{AppError, AppResult};
+use crate::models::{RefreshToken, User};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -27,7 +29,10 @@ pub struct AuthCallbackQuery {
 
 #[derive(Serialize)]
 pub struct AuthResponse {
-    pub token: String,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub access_token_expires_in: i64,
+    pub refresh_token_expires_in: i64,
     pub user: UserResponse,
 }
 
@@ -37,6 +42,17 @@ pub struct UserResponse {
     pub email: String,
     pub display_name: String,
     pub avatar_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct RefreshTokenRequest {
+    pub refresh_token: String,
+}
+
+#[derive(Serialize)]
+pub struct RefreshTokenResponse {
+    pub access_token: String,
+    pub access_token_expires_in: i64,
 }
 
 // GET /auth/google - Redirect to Google OAuth
@@ -122,17 +138,18 @@ pub async fn google_auth_callback(
         }
     };
 
-    // Create JWT
-    let jwt = match create_token(
+    // Create token pair
+    let (token_pair, refresh_token_id) = match jwt::create_token_pair(
         user.id,
         &user.email,
         &user.display_name,
         &state.config.jwt_secret,
-        state.config.jwt_expiry_hours,
+        state.config.access_token_expiry_minutes,
+        state.config.refresh_token_expiry_days,
     ) {
         Ok(t) => t,
         Err(e) => {
-            tracing::error!("Failed to create JWT: {:?}", e);
+            tracing::error!("Failed to create tokens: {:?}", e);
             return Redirect::temporary(&format!(
                 "{}?error=token_error",
                 state.config.frontend_url
@@ -140,13 +157,37 @@ pub async fn google_auth_callback(
         }
     };
 
+    // Store refresh token in database
+    let refresh_expires_at = Utc::now() + Duration::days(state.config.refresh_token_expiry_days);
+    if let Err(e) = RefreshToken::create(
+        &state.db_pool,
+        user.id,
+        refresh_token_id,
+        refresh_expires_at,
+        None, // user_agent - could extract from headers
+        None, // ip_address - could extract from request
+    ).await {
+        tracing::error!("Failed to store refresh token: {:?}", e);
+        // Continue anyway - the refresh token just won't work
+    }
+
     tracing::info!("User {} logged in successfully (new: {})", user.display_name, is_new_user);
 
-    // Redirect to frontend with token (and newUser flag if applicable)
+    // Redirect to frontend with tokens (and newUser flag if applicable)
     let redirect_url = if is_new_user {
-        format!("{}?token={}&newUser=true", state.config.frontend_url, jwt)
+        format!(
+            "{}?access_token={}&refresh_token={}&newUser=true",
+            state.config.frontend_url,
+            token_pair.access_token,
+            token_pair.refresh_token
+        )
     } else {
-        format!("{}?token={}", state.config.frontend_url, jwt)
+        format!(
+            "{}?access_token={}&refresh_token={}",
+            state.config.frontend_url,
+            token_pair.access_token,
+            token_pair.refresh_token
+        )
     };
     Redirect::temporary(&redirect_url)
 }
@@ -155,18 +196,17 @@ pub async fn google_auth_callback(
 pub async fn get_current_user(
     State(state): State<AppState>,
     auth_user: AuthUser,
-) -> impl IntoResponse {
-    match User::find_by_id(&state.db_pool, auth_user.user_id).await {
-        Ok(Some(user)) => Json(UserResponse {
-            id: user.id.to_string(),
-            email: user.email,
-            display_name: user.display_name,
-            avatar_url: user.avatar_url,
-        })
-        .into_response(),
-        Ok(None) => (axum::http::StatusCode::NOT_FOUND, "User not found").into_response(),
-        Err(_) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
-    }
+) -> AppResult<Json<UserResponse>> {
+    let user = User::find_by_id(&state.db_pool, auth_user.user_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("User", auth_user.user_id.to_string()))?;
+
+    Ok(Json(UserResponse {
+        id: user.id.to_string(),
+        email: user.email,
+        display_name: user.display_name,
+        avatar_url: user.avatar_url,
+    }))
 }
 
 fn create_oauth_client(state: &AppState) -> BasicClient {
@@ -203,21 +243,94 @@ pub async fn set_username(
     State(state): State<AppState>,
     auth_user: AuthUser,
     axum::Json(request): axum::Json<SetUsernameRequest>,
-) -> impl IntoResponse {
+) -> AppResult<Json<serde_json::Value>> {
     let username = request.username.trim();
 
     // Validate username
-    if username.is_empty() || username.len() > 20 {
-        return (axum::http::StatusCode::BAD_REQUEST, "Username must be 1-20 characters").into_response();
+    if username.is_empty() || username.len() > 15 {
+        return Err(AppError::validation("username", "Username must be 1-15 characters"));
     }
 
     // Only allow alphanumeric, underscores, and hyphens
     if !username.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
-        return (axum::http::StatusCode::BAD_REQUEST, "Username can only contain letters, numbers, underscores, and hyphens").into_response();
+        return Err(AppError::validation(
+            "username",
+            "Username can only contain letters, numbers, underscores, and hyphens",
+        ));
     }
 
-    match User::update_display_name(&state.db_pool, auth_user.user_id, username).await {
-        Ok(_) => axum::Json(serde_json::json!({"success": true})).into_response(),
-        Err(_) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to update username").into_response(),
+    User::update_display_name(&state.db_pool, auth_user.user_id, username).await?;
+
+    Ok(Json(serde_json::json!({"success": true})))
+}
+
+// POST /auth/refresh - Refresh access token using refresh token
+pub async fn refresh_token(
+    State(state): State<AppState>,
+    Json(request): Json<RefreshTokenRequest>,
+) -> AppResult<Json<RefreshTokenResponse>> {
+    // Validate the refresh token
+    let claims = jwt::validate_refresh_token(&request.refresh_token, &state.config.jwt_secret)?;
+
+    // Check if token exists in database and is not revoked
+    let is_valid = RefreshToken::is_valid(&state.db_pool, claims.token_id).await?;
+    if !is_valid {
+        tracing::warn!("Refresh token not found or revoked: {}", claims.token_id);
+        return Err(AppError::SessionRevoked);
     }
+
+    // Get user info for the new access token
+    let user = User::find_by_id(&state.db_pool, claims.sub)
+        .await?
+        .ok_or_else(|| {
+            tracing::warn!("User not found for refresh token: {}", claims.sub);
+            AppError::not_found("User", claims.sub.to_string())
+        })?;
+
+    // Create new access token
+    let access_token = jwt::create_access_token(
+        user.id,
+        &user.email,
+        &user.display_name,
+        &state.config.jwt_secret,
+        state.config.access_token_expiry_minutes,
+    )?;
+
+    Ok(Json(RefreshTokenResponse {
+        access_token,
+        access_token_expires_in: state.config.access_token_expiry_minutes * 60,
+    }))
+}
+
+// POST /auth/logout - Revoke refresh token
+pub async fn logout(
+    State(state): State<AppState>,
+    Json(request): Json<RefreshTokenRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    // Validate the refresh token to get the token_id
+    let claims = match jwt::validate_refresh_token(&request.refresh_token, &state.config.jwt_secret) {
+        Ok(c) => c,
+        Err(_) => {
+            // Token is invalid/expired - just return success since effectively logged out
+            return Ok(Json(serde_json::json!({"success": true})));
+        }
+    };
+
+    // Revoke the token
+    RefreshToken::revoke(&state.db_pool, claims.token_id).await?;
+
+    Ok(Json(serde_json::json!({"success": true})))
+}
+
+// POST /auth/logout-all - Revoke all refresh tokens for user
+pub async fn logout_all(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+) -> AppResult<Json<serde_json::Value>> {
+    let count = RefreshToken::revoke_all_for_user(&state.db_pool, auth_user.user_id).await?;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "sessions_revoked": count
+    })))
 }

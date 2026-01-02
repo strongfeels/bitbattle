@@ -5,6 +5,7 @@ import { apiFetch } from '../utils/api';
 import NavBar from './NavBar.tsx';
 import Footer from './Footer.tsx';
 
+import { LeaderboardSkeleton } from './Skeleton.tsx';
 type SortOption = 'wins' | 'problems_solved' | 'fastest' | 'streak';
 
 export default function Leaderboard() {
@@ -80,7 +81,7 @@ export default function Leaderboard() {
                     {/* Leaderboard Table */}
                     <div className="bg-white/10 backdrop-blur-md rounded-xl overflow-hidden">
                         {isLoading ? (
-                            <div className="p-8 text-center text-white">Loading...</div>
+                            <LeaderboardSkeleton />
                         ) : error ? (
                             <div className="p-8 text-center text-red-300">{error}</div>
                         ) : entries.length === 0 ? (

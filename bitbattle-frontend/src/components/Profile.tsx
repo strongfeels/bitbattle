@@ -6,6 +6,7 @@ import { apiFetch } from '../utils/api';
 import NavBar from './NavBar.tsx';
 import Footer from './Footer.tsx';
 
+import { ProfileSkeleton } from './Skeleton.tsx';
 export default function Profile() {
     const { userId } = useParams<{ userId?: string }>();
     const { user: currentUser, isAuthenticated } = useAuth();
@@ -80,7 +81,7 @@ export default function Profile() {
             <div className="min-h-screen bg-zinc-900 flex flex-col">
                 <NavBar />
                 <div className="flex-1 flex items-center justify-center">
-                    <div className="text-zinc-400">Loading...</div>
+                    <ProfileSkeleton />
                 </div>
                 <Footer />
             </div>
